@@ -1,2 +1,2 @@
 from pathlib import Path
-STRESS_DS_PATH = Path('.local/stress')
+STRESS_RAW_PATH = Path('.local/stress/raw')
