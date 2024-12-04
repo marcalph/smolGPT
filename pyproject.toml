@@ -4,6 +4,7 @@ version = "0.1.0"
 description = ""
 authors = ["marcalph <marcalph@protonmail.com>"]
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -14,6 +15,7 @@ pandas = "^2.2.3"
 tiktoken = "^0.8.0"
 litellm = "^1.53.4"
 weave = "^0.51.23"
+kaggle = "^1.6.17"
 
 
 [tool.poetry.group.dev.dependencies]
