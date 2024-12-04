@@ -71,15 +71,43 @@ def upload_datasets(dir_path:Path, client:OpenAI) -> None:
   # save mapping to file
   with open(dir_path.parent/"utils/stress_datasets_mapping.json", 'w') as json_file:
     json.dump(stress_datasets_mapping, json_file)
-  
+
+
+def finetune_test(openai_client:OpenAI, model="gpt-3.5-turbo") -> str:
+  ftmodel = openai_client.fine_tuning.jobs.create(
+    model=model,
+    training_file="file-WrSvu2SZanckGLugdLSrpL", # train 1200
+    validation_file="file-JD8qkemtmDCdgH9xs9i5ce", # validation
+    hyperparameters={
+      "n_epochs": 3,
+      "batch_size": 3,
+      "learning_rate_multiplier": 2
+  }
+  )
+  job_id = ftmodel.id
+  status = ftmodel.status
+
+  logger.info(f'Fine-tuning model with jobID: {job_id}.')
+  logger.info(f"Training Response: {ftmodel}")
+  logger.info(f"Training Status: {status}")
+  return job_id
+
 
 if __name__ == "__main__":
   from utils import STRESS_RAW_PATH
-  # load data
-  data_cleaned = load_stress_data(STRESS_RAW_PATH)
-  output_dir = STRESS_RAW_PATH.parent/"processed"
-  # process data
-  split_and_serialize_to_jsonl(data_cleaned, output_dir, fragment_trainset=True)
   client = OpenAI(api_key=os.getenv("OPENAI_API_KEY_MLEXPERIMENTS"))
-  # upload
-  upload_datasets(output_dir, client)
+  prepare_data = False
+  train = False
+  evaluate = False
+
+  if prepare_data:
+    # load data
+    data_cleaned = load_stress_data(STRESS_RAW_PATH)
+    output_dir = STRESS_RAW_PATH.parent/"processed"
+    # process data
+    split_and_serialize_to_jsonl(data_cleaned, output_dir, fragment_trainset=True)
+    # upload
+    upload_datasets(output_dir, client)
+  if train:
+    finetune_test(client)
+  
