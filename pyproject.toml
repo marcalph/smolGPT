@@ -16,6 +16,7 @@ tiktoken = "^0.8.0"
 litellm = "^1.53.4"
 weave = "^0.51.23"
 kaggle = "^1.6.17"
+scikit-learn = "^1.5.2"
 
 
 [tool.poetry.group.dev.dependencies]
