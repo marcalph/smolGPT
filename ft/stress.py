@@ -78,6 +78,8 @@ if __name__ == "__main__":
   # load data
   data_cleaned = load_stress_data(STRESS_RAW_PATH)
   output_dir = STRESS_RAW_PATH.parent/"processed"
+  # process data
   split_and_serialize_to_jsonl(data_cleaned, output_dir, fragment_trainset=True)
   client = OpenAI(api_key=os.getenv("OPENAI_API_KEY_MLEXPERIMENTS"))
+  # upload
   upload_datasets(output_dir, client)
