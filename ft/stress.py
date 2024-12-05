@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 from pathlib import Path
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from tqdm import tqdm
+from wandb.integration.openai.fine_tuning import WandbLogger
+
 load_dotenv("/Users/marcalph/.ssh/llm_api_keys.env")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -80,7 +82,7 @@ def upload_datasets(dir_path:Path, client:OpenAI) -> None:
 def finetune_test(openai_client:OpenAI, model="gpt-3.5-turbo") -> str:
   ftmodel = openai_client.fine_tuning.jobs.create(
     model=model,
-    training_file="file-WrSvu2SZanckGLugdLSrpL", # train 1200
+    training_file="file-Rzq4uHT6uenTsqLBDMk7b2", # train 400
     validation_file="file-JD8qkemtmDCdgH9xs9i5ce", # validation
     hyperparameters={
       "n_epochs": 3,
@@ -88,13 +90,20 @@ def finetune_test(openai_client:OpenAI, model="gpt-3.5-turbo") -> str:
       "learning_rate_multiplier": 2
   }
   )
-  job_id = ftmodel.id
+  ftjob_id = ftmodel.id
   status = ftmodel.status
 
-  logger.info(f'Fine-tuning model with jobID: {job_id}.')
+  logger.info(f'Fine-tuning model with jobID: {ftjob_id}.')
   logger.info(f"Training Response: {ftmodel}")
   logger.info(f"Training Status: {status}")
-  return job_id
+  # todo check need for  of kwargs_wandb_init.config
+  WandbLogger.sync(
+    fine_tune_job_id=ftjob_id, 
+    openai_client=openai_client,
+    project="ml-experiments", 
+    wait_for_job_success=False,
+    tags=["ft", "openai", "stress", "400"])
+  return ftjob_id
 
 
 def predict(openai_client: OpenAI, test_df: pd.DataFrame,  model:str):
@@ -179,8 +188,8 @@ if __name__ == "__main__":
   output_dir = STRESS_RAW_PATH.parent/"processed"
   client = OpenAI(api_key=os.getenv("OPENAI_API_KEY_MLEXPERIMENTS"))
   prepare_data = False
-  train = False
-  evaluate = True
+  train = True
+  evaluate = False
 
   if prepare_data:
     # load data
@@ -190,7 +199,8 @@ if __name__ == "__main__":
     # upload
     upload_datasets(output_dir, client)
   if train:
-    finetune_test(client)
+    for _ in range(5):
+      finetune_test(client)
   if evaluate:
     data_cleaned = load_stress_data(STRESS_RAW_PATH)
     _, test_df = split_and_serialize_to_jsonl(data_cleaned, output_dir, serialize=False)
