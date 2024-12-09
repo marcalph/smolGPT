@@ -12,6 +12,28 @@ from tqdm import tqdm
 from wandb.integration.openai.fine_tuning import WandbLogger
 import wandb
 import glob
+import tempfile
+from utils import STRESS_RAW_PATH, WANDB_PROJECT
+from enum import Enum
+
+
+class ArtifactType(Enum):
+    RAW = "raw"
+    PREP = "preprocessed"
+    TRAIN = "train"
+    VALIDATION = "validation"
+    TEST = "test"
+    COMPLETION = "completion"
+    CONVERSATION_CHUNK = "conversation_chunk"
+
+
+class WandbJobType(Enum):
+    UPLOAD = "upload"
+    SPLIT = "split"
+    FINE_TUNING = "upload"
+    EVALUATION = "evaluation"
+    PREDICTION = "prediction"
+
 
 
 load_dotenv("/Users/marcalph/.ssh/llm_api_keys.env")
@@ -19,11 +41,25 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 
-def load_stress_data(raw_path:Path) -> pd.DataFrame:
+def stress_dataprep(raw_path:Path) -> pd.DataFrame:
+  run = wandb.init(project=WANDB_PROJECT, job_type=WandbJobType.UPLOAD.value)
   data = pd.read_csv(raw_path/"Reddit_Title.csv", sep=';')
+  raw_artifact = wandb.Artifact(name="stress_raw", type=ArtifactType.RAW.value)
+  raw_artifact.add_file(raw_path/"Reddit_Title.csv")
+
+  proc_artifact = wandb.Artifact(name="stress_processed", type=ArtifactType.PREP.value)
+  
   data_cleaned = data[['title', 'label']].head(5000)
   label_mapping = {0: "non-stress", 1: "stress"}
   data_cleaned['label'] = data_cleaned['label'].map(label_mapping)
+
+  with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as temp_csv:
+    data_cleaned.to_csv(temp_csv.name, index=False)
+    proc_artifact.add_file(temp_csv.name)
+
+  run.log_artifact(raw_artifact)
+  run.log_artifact(proc_artifact)
+  run.finish()
   return data_cleaned
 
 
@@ -44,27 +80,40 @@ def df_to_jsonl(data:pd.DataFrame, output_file_path:Path) -> None:
   logger.info(f"Saved {len(jsonl_data)} items to {output_file_path.name}")
 
 
-def split_and_serialize_to_jsonl(df:pd.DataFrame, output_dir:Path, serialize:bool=True, fragment_trainset:bool=True) -> None:
+def stress_split(df:pd.DataFrame, output_dir:Path, serialize:bool=True, fragment_trainset:bool=True) -> None:
   # split data into training and validation
   train_data, validation_data = train_test_split(df, test_size=0.2, random_state=42)
   
   if not serialize:
     return train_data, validation_data
-    
+
   # serialize data
   os.makedirs(output_dir, exist_ok=True)
-
+  run = wandb.init(project=WANDB_PROJECT, job_type=WandbJobType.SPLIT.value)
+  ats  = {}
   if fragment_trainset:
     for i in np.linspace(len(train_data)//10, len(train_data), num=10):
-      train_output_file_path = output_dir/f'stress_detection_train_{int(i)}.jsonl'
+      split = f'stress_detection_train_{int(i)}.jsonl'
+      train_output_file_path = output_dir/split
       df_to_jsonl(train_data.iloc[:int(i)], train_output_file_path)
+      ats[split] = wandb.Artifact(name=split, type=ArtifactType.TRAIN.value)
+      ats[split].add_file(train_output_file_path)
   else:
-    train_output_file_path = output_dir/'stress_detection_train.jsonl'
+    split = 'stress_detection_train.jsonl'
+    train_output_file_path = output_dir/split
     df_to_jsonl(train_data, train_output_file_path)
+    ats[split] = wandb.Artifact(name=split, type=ArtifactType.TRAIN.value)
+    ats[split].add_file(train_output_file_path)
 
-  validation_output_file_path = output_dir/'stress_detection_validation.jsonl'
+  split = 'stress_detection_validation.jsonl'
+  validation_output_file_path = output_dir/split
   df_to_jsonl(validation_data, validation_output_file_path)
+  ats[split] = wandb.Artifact(name=split, type=ArtifactType.VALIDATION.value)
   logger.info(f"jsonl files saved to {output_dir}")
+
+  for _, at in ats.items():
+    run.log_artifact(at)
+  run.finish()
   return train_data, validation_data
 
 
@@ -194,21 +243,20 @@ def eval_data_format(row):
 
 
 if __name__ == "__main__":
-  from utils import STRESS_RAW_PATH
   output_dir = STRESS_RAW_PATH.parent/"processed"
   client = OpenAI(api_key=os.getenv("OPENAI_API_KEY_MLEXPERIMENTS"))
-  prepare_data = False
+  prepare_data = True
   train = False
   evaluate = False
-  wandb_eval = True
+  wandb_eval = False
 
   if prepare_data:
     # load data
-    data_cleaned = load_stress_data(STRESS_RAW_PATH)
+    data_cleaned = stress_dataprep(STRESS_RAW_PATH)
     # process data
-    split_and_serialize_to_jsonl(data_cleaned, output_dir, serialize=True, fragment_trainset=True)
+    stress_split(data_cleaned, output_dir, serialize=True, fragment_trainset=True)
     # upload
-    upload_datasets(output_dir, client)
+    # upload_datasets(output_dir, client)
   if train:
     for _ in range(3):
       finetune_test(client)
