@@ -10,6 +10,9 @@ from pathlib import Path
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from tqdm import tqdm
 from wandb.integration.openai.fine_tuning import WandbLogger
+import wandb
+import glob
+
 
 load_dotenv("/Users/marcalph/.ssh/llm_api_keys.env")
 logging.basicConfig(level=logging.INFO)
@@ -82,7 +85,7 @@ def upload_datasets(dir_path:Path, client:OpenAI) -> None:
 def finetune_test(openai_client:OpenAI, model="gpt-3.5-turbo") -> str:
   ftmodel = openai_client.fine_tuning.jobs.create(
     model=model,
-    training_file="file-Rzq4uHT6uenTsqLBDMk7b2", # train 400
+    training_file="file-ELcL7UfWJ11GKVcLMcX7rK", # train 800
     validation_file="file-JD8qkemtmDCdgH9xs9i5ce", # validation
     hyperparameters={
       "n_epochs": 3,
@@ -102,7 +105,7 @@ def finetune_test(openai_client:OpenAI, model="gpt-3.5-turbo") -> str:
     openai_client=openai_client,
     project="ml-experiments", 
     wait_for_job_success=False,
-    tags=["ft", "openai", "stress", "400"])
+    tags=["ft", "openai", "stress", "800"])
   return ftjob_id
 
 
@@ -180,7 +183,14 @@ def run_evaluation(y_true: np.ndarray, y_pred:np.ndarray):
     print(conf_matrix)
 
 
+def eval_data_format(row):
+    role_system_content = row["role: system"]
+    role_system_dict = {"role": "system", "content": role_system_content}
 
+    role_user_content = row["role: user"]
+    role_user_dict = {"role": "user", "content": role_user_content}
+    
+    return [role_system_dict, role_user_dict]
 
 
 if __name__ == "__main__":
@@ -188,8 +198,9 @@ if __name__ == "__main__":
   output_dir = STRESS_RAW_PATH.parent/"processed"
   client = OpenAI(api_key=os.getenv("OPENAI_API_KEY_MLEXPERIMENTS"))
   prepare_data = False
-  train = True
+  train = False
   evaluate = False
+  wandb_eval = True
 
   if prepare_data:
     # load data
@@ -199,7 +210,7 @@ if __name__ == "__main__":
     # upload
     upload_datasets(output_dir, client)
   if train:
-    for _ in range(5):
+    for _ in range(3):
       finetune_test(client)
   if evaluate:
     data_cleaned = load_stress_data(STRESS_RAW_PATH)
@@ -208,3 +219,108 @@ if __name__ == "__main__":
     run_evaluation(test_df['label'], y_pred)
     y_pred = predict(client, test_df, model="ft:gpt-3.5-turbo-0125:wingmate::AarlN1qI")  
     run_evaluation(test_df['label'], y_pred)
+  if wandb_eval:
+    run = wandb.init(
+      project='ml-experiments',
+      job_type='eval'
+    )
+    VALIDATION_FILE_ARTIFACT_URI = 'wingmate-ai/ml-experiments/valid-file-JD8qkemtmDCdgH9xs9i5ce:v0'
+
+    artifact_valid = run.use_artifact(
+        VALIDATION_FILE_ARTIFACT_URI,
+        type='validation_files'
+    )
+    artifact_valid_path = artifact_valid.download()
+    logger.info(f"Downloaded the validation data at: {artifact_valid_path}")
+
+    validation_file = glob.glob(f"{artifact_valid_path}/*.table.json")[0]
+    with open(validation_file, 'r') as file:
+        data = json.load(file)
+
+    validation_df = pd.DataFrame(columns=data["columns"], data=data["data"])
+
+    logger.info(f"There are {len(validation_df)} validation examples")
+    run.config.update({"num_validation_samples":len(validation_df)})
+    validation_df.head()
+    validation_df["messages"] = validation_df.apply(lambda row: eval_data_format(row), axis=1)
+    validation_df.head()
+
+    MODEL_ARTIFACT_URI = 'wingmate-ai/ml-experiments/model-metadata:v8' # REPLACE THIS WITH YOUR OWN ARTIFACT URI
+
+    model_artifact = run.use_artifact(
+    MODEL_ARTIFACT_URI,
+    type='model'
+    )
+    model_metadata_path = model_artifact.download()
+    logger.info(f"Downloaded the validation data at: {model_metadata_path}")
+
+    model_metadata_file = glob.glob(f"{model_metadata_path}/*.json")[0]
+    with open(model_metadata_file, 'r') as file:
+        model_metadata = json.load(file)
+
+    fine_tuned_model = model_metadata["fine_tuned_model"]
+    prediction_table = wandb.Table(columns=['messages', 'completion', 'target'])
+
+    eval_data = []
+
+    for idx, row in tqdm(validation_df.iterrows()):
+        messages = row.messages
+        target = row["role: assistant"]
+
+        res = client.chat.completions.create(model=fine_tuned_model, messages=messages, max_tokens=10)
+        completion = res.choices[0].message.content
+
+        eval_data.append([messages, completion, target])
+        prediction_table.add_data(messages[1]['content'], completion, target)
+
+    wandb.log({'predictions': prediction_table})
+    correct = 0
+    for e in eval_data:
+      if e[1].lower() == e[2].lower():
+        correct+=1
+
+    accuracy = correct / len(eval_data)
+
+    print(f"Accuracy is {accuracy}")
+    wandb.log({"eval/accuracy": accuracy})
+    wandb.summary["eval/accuracy"] = accuracy
+
+    correct = 0
+    for e in eval_data:
+      if e[1].lower() == e[2].lower():
+        correct+=1
+
+    accuracy = correct / len(eval_data)
+
+    print(f"Accuracy is {accuracy}")
+    wandb.log({"eval/accuracy": accuracy})
+    wandb.summary["eval/accuracy"] = accuracy
+
+
+    baseline_prediction_table = wandb.Table(columns=['messages', 'completion', 'target'])
+
+    baseline_eval_data = []
+
+    for idx, row in tqdm(validation_df.iterrows()):
+        messages = row.messages
+        target = row["role: assistant"]
+
+        res = client.chat.completions.create(model="gpt-3.5-turbo", messages=messages, max_tokens=10)
+        completion = res.choices[0].message.content
+
+        baseline_eval_data.append([messages, completion, target])
+        baseline_prediction_table.add_data(messages[1]['content'], completion, target)
+
+    wandb.log({'baseline_predictions': baseline_prediction_table})
+    baseline_correct = 0
+    for e in baseline_eval_data:
+      if e[1].lower() == e[2].lower():
+        baseline_correct+=1
+
+    baseline_accuracy = baseline_correct / len(baseline_eval_data)
+    print(f"Baseline Accurcy is: {baseline_accuracy}")
+    wandb.log({"eval/baseline_accuracy": baseline_accuracy})
+    wandb.summary["eval/baseline_accuracy"] =  baseline_accuracy
+    wandb.finish()
+
+
