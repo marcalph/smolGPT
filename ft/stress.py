@@ -20,8 +20,7 @@ from enum import Enum
 class ArtifactType(Enum):
     RAW = "raw"
     PREP = "preprocessed"
-    TRAIN = "train"
-    VALIDATION = "validation"
+    SPLIT = "split"
     TEST = "test"
     COMPLETION = "completion"
     CONVERSATION_CHUNK = "conversation_chunk"
@@ -29,6 +28,7 @@ class ArtifactType(Enum):
 
 class WandbJobType(Enum):
     UPLOAD = "upload"
+    SYNC = "sync"
     SPLIT = "split"
     FINE_TUNING = "upload"
     EVALUATION = "evaluation"
@@ -89,49 +89,59 @@ def stress_split(df:pd.DataFrame, output_dir:Path, serialize:bool=True, fragment
 
   # serialize data
   os.makedirs(output_dir, exist_ok=True)
-  run = wandb.init(project=WANDB_PROJECT, job_type=WandbJobType.SPLIT.value)
+  run = wandb.init(project=WANDB_PROJECT, job_type=WandbJobType.UPLOAD.value)
   ats  = {}
   if fragment_trainset:
     for i in np.linspace(len(train_data)//10, len(train_data), num=10):
       split = f'stress_detection_train_{int(i)}.jsonl'
       train_output_file_path = output_dir/split
+      # TODO change split to shuffle + slice
       df_to_jsonl(train_data.iloc[:int(i)], train_output_file_path)
-      ats[split] = wandb.Artifact(name=split, type=ArtifactType.TRAIN.value)
+      ats[split] = wandb.Artifact(name=split, type=ArtifactType.SPLIT.value)
       ats[split].add_file(train_output_file_path)
   else:
     split = 'stress_detection_train.jsonl'
     train_output_file_path = output_dir/split
     df_to_jsonl(train_data, train_output_file_path)
-    ats[split] = wandb.Artifact(name=split, type=ArtifactType.TRAIN.value)
+    ats[split] = wandb.Artifact(name=split, type=ArtifactType.SPLIT.value)
     ats[split].add_file(train_output_file_path)
-
+  print("train files done")
   split = 'stress_detection_validation.jsonl'
   validation_output_file_path = output_dir/split
   df_to_jsonl(validation_data, validation_output_file_path)
-  ats[split] = wandb.Artifact(name=split, type=ArtifactType.VALIDATION.value)
+  ats[split] = wandb.Artifact(name=split, type=ArtifactType.SPLIT.value)
+  ats[split].add_file(validation_output_file_path)
+
   logger.info(f"jsonl files saved to {output_dir}")
 
   for _, at in ats.items():
     run.log_artifact(at)
   run.finish()
-  return train_data, validation_data
+  # return train_data, validation_data
+  return ats
 
 
 
-def upload_datasets(dir_path:Path, client:OpenAI) -> None:
+def upload_datasets(ats: dict, client:OpenAI) -> None:
   stress_datasets_mapping = {}
-  for file_path in dir_path.glob("*.jsonl"):
+  run = wandb.init(project=WANDB_PROJECT, job_type=WandbJobType.SYNC.value)
+  logger.warning(f"ats keys {ats.keys()}")
+  for file_path in ats.keys():
+    file_art  = run.use_artifact(file_path+":latest")
+    dest = file_art.download()
+    logger.warning(f"Downloaded {file_path} to {dest}")
     fileobj = client.files.create(
-      file=open(file_path, 'rb'), 
+      file=open(f"{dest}/{file_path}", 'rb'), 
       purpose="fine-tune")
-    logger.info(f"Uploaded {file_path.name} to OpenAI")
-    stress_datasets_mapping[file_path.name] = fileobj.id
-  # save mapping to file
-  with open(dir_path.parent/"utils/stress_datasets_mapping.json", 'w') as json_file:
-    json.dump(stress_datasets_mapping, json_file)
+    logger.info(f"Uploaded {file_path} to OpenAI")
+    stress_datasets_mapping[file_path] = fileobj.id
+    # save mapping to file
+    with open(STRESS_RAW_PATH.parent/"utils/stress_datasets_mapping.json", 'w') as json_file:
+      json.dump(stress_datasets_mapping, json_file)
+  run.finish()
 
 
-def finetune_test(openai_client:OpenAI, model="gpt-3.5-turbo") -> str:
+def finetune_test(openai_client:OpenAI, model="gpt-3.5-turbo") -> str:##
   ftmodel = openai_client.fine_tuning.jobs.create(
     model=model,
     training_file="file-ELcL7UfWJ11GKVcLMcX7rK", # train 800
@@ -254,9 +264,9 @@ if __name__ == "__main__":
     # load data
     data_cleaned = stress_dataprep(STRESS_RAW_PATH)
     # process data
-    stress_split(data_cleaned, output_dir, serialize=True, fragment_trainset=True)
+    ats = stress_split(data_cleaned, output_dir, serialize=True, fragment_trainset=True)
     # upload
-    # upload_datasets(output_dir, client)
+    upload_datasets(ats, client)
   if train:
     for _ in range(3):
       finetune_test(client)
