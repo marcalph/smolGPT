@@ -41,6 +41,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 
+
 def stress_dataprep(raw_path:Path) -> pd.DataFrame:
   run = wandb.init(project=WANDB_PROJECT, job_type=WandbJobType.UPLOAD.value)
   data = pd.read_csv(raw_path/"Reddit_Title.csv", sep=';')
@@ -55,7 +56,8 @@ def stress_dataprep(raw_path:Path) -> pd.DataFrame:
 
   with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as temp_csv:
     data_cleaned.to_csv(temp_csv.name, index=False)
-    proc_artifact.add_file(temp_csv.name)
+  
+  proc_artifact.add_file(temp_csv.name)
 
   run.log_artifact(raw_artifact)
   run.log_artifact(proc_artifact)
