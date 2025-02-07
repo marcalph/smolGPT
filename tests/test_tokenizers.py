@@ -8,7 +8,7 @@ from hypothesis import given, strategies as st, settings, HealthCheck
 def test_corpus():
     return read_corpus("data/tinyshakespeare.txt")
 
-# we dont care that the test_corpus fixture is not resetted between hypothesis examples
+# we dont care that the test_corpus fixture is not reset between hypothesis sample generation
 # we dont use hypothesis for now because char tokenization depends on input corpus
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(test_string = st.text(min_size=0, max_size=100))
