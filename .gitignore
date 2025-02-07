@@ -3,3 +3,5 @@ logs/
 .local/
 wandb/
 artifacts/
+.hypothesis/
+.pytest_cache/
