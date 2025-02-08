@@ -5,3 +5,4 @@ wandb/
 artifacts/
 .hypothesis/
 .pytest_cache/
+.vscode/
