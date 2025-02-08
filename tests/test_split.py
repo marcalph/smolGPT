@@ -1,5 +1,5 @@
 import pytest
-from model.split import Splitter
+from model.training import Splitter
 from model.tokenize import CharTokenizer
 from hypothesis import given, strategies as st
 import torch
