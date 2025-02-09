@@ -3,20 +3,13 @@ from pathlib import Path
 from model.tokenize import CharTokenizer
 import logging
 from model.training import Splitter, make_batches, estimate_loss
-from model.architecture import BigramLM
+from model.architecture import BigramLM,BigramLMv2, max_steps, eval_interval, device, eval_steps, batch_sz, context_sz, d_head, d_embd
 import torch
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-#hparams
-batch_sz  = 32
-context_sz = 8
-max_steps = 20000
-eval_interval = 1000
-lr = 1e-2
-device = torch.device("cpu")#torch.device("mps") if torch.mps.is_available() else torch.device("cpu")
-eval_steps = 200
+
 
 
 if __name__ == "__main__":
@@ -25,16 +18,15 @@ if __name__ == "__main__":
     tokenizer.read(corpus)
     tokenized_corpus = tokenizer.encode(corpus)
 
-    context_sz = 16
     splitter = Splitter()
     train_data, val_data = splitter.sequential_split(tokenized_corpus).values()
 
-    m = BigramLM(tokenizer.vocab_sz, tokenizer.vocab_sz)
+    m = BigramLMv2(tokenizer.vocab_sz, d_embd, d_head)
     m = m.to(device)
 
     optimizer = torch.optim.AdamW(m.parameters(), lr=1e-3) # 3e-4
     for step in range(max_steps):
-        xb, yb = next(make_batches(train_data, device, 64, 24))
+        xb, yb = next(make_batches(train_data, device, batch_sz, context_sz))
         logits, loss = m(xb, yb)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
