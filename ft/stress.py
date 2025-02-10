@@ -35,145 +35,156 @@ class WandbJobType(Enum):
     PREDICTION = "prediction"
 
 
-
 load_dotenv("/Users/marcalph/.ssh/llm_api_keys.env")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def stress_dataprep(raw_path:Path) -> pd.DataFrame:
-  run = wandb.init(project=WANDB_PROJECT, job_type=WandbJobType.UPLOAD.value)
-  data = pd.read_csv(raw_path/"Reddit_Title.csv", sep=';')
-  raw_artifact = wandb.Artifact(name="stress_raw", type=ArtifactType.RAW.value)
-  raw_artifact.add_file(raw_path/"Reddit_Title.csv")
+def stress_dataprep(raw_path: Path) -> pd.DataFrame:
+    run = wandb.init(project=WANDB_PROJECT, job_type=WandbJobType.UPLOAD.value)
+    data = pd.read_csv(raw_path / "Reddit_Title.csv", sep=";")
+    raw_artifact = wandb.Artifact(name="stress_raw", type=ArtifactType.RAW.value)
+    raw_artifact.add_file(raw_path / "Reddit_Title.csv")
 
-  proc_artifact = wandb.Artifact(name="stress_processed", type=ArtifactType.PREP.value)
-  
-  data_cleaned = data[['title', 'label']].head(5000)
-  label_mapping = {0: "non-stress", 1: "stress"}
-  data_cleaned['label'] = data_cleaned['label'].map(label_mapping)
+    proc_artifact = wandb.Artifact(
+        name="stress_processed", type=ArtifactType.PREP.value
+    )
 
-  with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as temp_csv:
-    data_cleaned.to_csv(temp_csv.name, index=False)
-  
-  proc_artifact.add_file(temp_csv.name)
+    data_cleaned = data[["title", "label"]].head(5000)
+    label_mapping = {0: "non-stress", 1: "stress"}
+    data_cleaned["label"] = data_cleaned["label"].map(label_mapping)
 
-  run.log_artifact(raw_artifact)
-  run.log_artifact(proc_artifact)
-  run.finish()
-  return data_cleaned
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as temp_csv:
+        data_cleaned.to_csv(temp_csv.name, index=False)
 
+    proc_artifact.add_file(temp_csv.name)
 
-def df_to_jsonl(data:pd.DataFrame, output_file_path:Path) -> None:
-  jsonl_data = []
-  for _, row in data.iterrows():
-    jsonl_data.append({
-      "messages": [
-        {"role": "system", "content": "Given a social media post, classify whether it indicates 'stress' or 'non-stress'."},
-        {"role": "user", "content": row['title']},
-        {"role": "assistant", "content": f"\"{row['label']}\""}
-      ]
-    })
-
-  with open(output_file_path, 'w') as f:
-    for item in jsonl_data:
-      f.write(json.dumps(item) + '\n')
-  logger.info(f"Saved {len(jsonl_data)} items to {output_file_path.name}")
+    run.log_artifact(raw_artifact)
+    run.log_artifact(proc_artifact)
+    run.finish()
+    return data_cleaned
 
 
-def stress_split(df:pd.DataFrame, output_dir:Path, serialize:bool=True, fragment_trainset:bool=True) -> None:
-  # split data into training and validation
-  train_data, validation_data = train_test_split(df, test_size=0.2, random_state=42)
-  
-  if not serialize:
-    return train_data, validation_data
+def df_to_jsonl(data: pd.DataFrame, output_file_path: Path) -> None:
+    jsonl_data = []
+    for _, row in data.iterrows():
+        jsonl_data.append(
+            {
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Given a social media post, classify whether it indicates 'stress' or 'non-stress'.",
+                    },
+                    {"role": "user", "content": row["title"]},
+                    {"role": "assistant", "content": f'"{row["label"]}"'},
+                ]
+            }
+        )
 
-  # serialize data
-  os.makedirs(output_dir, exist_ok=True)
-  run = wandb.init(project=WANDB_PROJECT, job_type=WandbJobType.UPLOAD.value)
-  ats  = {}
-  if fragment_trainset:
-    for i in np.linspace(len(train_data)//10, len(train_data), num=10):
-      split = f'stress_detection_train_{int(i)}.jsonl'
-      train_output_file_path = output_dir/split
-      # TODO change split to shuffle + slice
-      df_to_jsonl(train_data.iloc[:int(i)], train_output_file_path)
-      ats[split] = wandb.Artifact(name=split, type=ArtifactType.SPLIT.value)
-      ats[split].add_file(train_output_file_path)
-  else:
-    split = 'stress_detection_train.jsonl'
-    train_output_file_path = output_dir/split
-    df_to_jsonl(train_data, train_output_file_path)
+    with open(output_file_path, "w") as f:
+        for item in jsonl_data:
+            f.write(json.dumps(item) + "\n")
+    logger.info(f"Saved {len(jsonl_data)} items to {output_file_path.name}")
+
+
+def stress_split(
+    df: pd.DataFrame,
+    output_dir: Path,
+    serialize: bool = True,
+    fragment_trainset: bool = True,
+) -> None:
+    # split data into training and validation
+    train_data, validation_data = train_test_split(df, test_size=0.2, random_state=42)
+
+    if not serialize:
+        return train_data, validation_data
+
+    # serialize data
+    os.makedirs(output_dir, exist_ok=True)
+    run = wandb.init(project=WANDB_PROJECT, job_type=WandbJobType.UPLOAD.value)
+    ats = {}
+    if fragment_trainset:
+        for i in np.linspace(len(train_data) // 10, len(train_data), num=10):
+            split = f"stress_detection_train_{int(i)}.jsonl"
+            train_output_file_path = output_dir / split
+            # TODO change split to shuffle + slice
+            df_to_jsonl(train_data.iloc[: int(i)], train_output_file_path)
+            ats[split] = wandb.Artifact(name=split, type=ArtifactType.SPLIT.value)
+            ats[split].add_file(train_output_file_path)
+    else:
+        split = "stress_detection_train.jsonl"
+        train_output_file_path = output_dir / split
+        df_to_jsonl(train_data, train_output_file_path)
+        ats[split] = wandb.Artifact(name=split, type=ArtifactType.SPLIT.value)
+        ats[split].add_file(train_output_file_path)
+    print("train files done")
+    split = "stress_detection_validation.jsonl"
+    validation_output_file_path = output_dir / split
+    df_to_jsonl(validation_data, validation_output_file_path)
     ats[split] = wandb.Artifact(name=split, type=ArtifactType.SPLIT.value)
-    ats[split].add_file(train_output_file_path)
-  print("train files done")
-  split = 'stress_detection_validation.jsonl'
-  validation_output_file_path = output_dir/split
-  df_to_jsonl(validation_data, validation_output_file_path)
-  ats[split] = wandb.Artifact(name=split, type=ArtifactType.SPLIT.value)
-  ats[split].add_file(validation_output_file_path)
+    ats[split].add_file(validation_output_file_path)
 
-  logger.info(f"jsonl files saved to {output_dir}")
+    logger.info(f"jsonl files saved to {output_dir}")
 
-  for _, at in ats.items():
-    run.log_artifact(at)
-  run.finish()
-  # return train_data, validation_data
-  return ats
+    for _, at in ats.items():
+        run.log_artifact(at)
+    run.finish()
+    # return train_data, validation_data
+    return ats
 
 
-
-def upload_datasets(ats: dict, client:OpenAI) -> None:
-  stress_datasets_mapping = {}
-  run = wandb.init(project=WANDB_PROJECT, job_type=WandbJobType.SYNC.value)
-  logger.warning(f"ats keys {ats.keys()}")
-  for file_path in ats.keys():
-    file_art  = run.use_artifact(file_path+":latest")
-    dest = file_art.download()
-    logger.warning(f"Downloaded {file_path} to {dest}")
-    fileobj = client.files.create(
-      file=open(f"{dest}/{file_path}", 'rb'), 
-      purpose="fine-tune")
-    logger.info(f"Uploaded {file_path} to OpenAI")
-    stress_datasets_mapping[file_path] = fileobj.id
-    # save mapping to file
-    with open(STRESS_RAW_PATH.parent/"utils/stress_datasets_mapping.json", 'w') as json_file:
-      json.dump(stress_datasets_mapping, json_file)
-  run.finish()
-
-
-def finetune_test(openai_client:OpenAI, model="gpt-3.5-turbo") -> str:##
-  ftmodel = openai_client.fine_tuning.jobs.create(
-    model=model,
-    training_file="file-ELcL7UfWJ11GKVcLMcX7rK", # train 800
-    validation_file="file-JD8qkemtmDCdgH9xs9i5ce", # validation
-    hyperparameters={
-      "n_epochs": 3,
-      "batch_size": 3,
-      "learning_rate_multiplier": 2
-  }
-  )
-  ftjob_id = ftmodel.id
-  status = ftmodel.status
-
-  logger.info(f'Fine-tuning model with jobID: {ftjob_id}.')
-  logger.info(f"Training Response: {ftmodel}")
-  logger.info(f"Training Status: {status}")
-  # todo check need for  of kwargs_wandb_init.config
-  WandbLogger.sync(
-    fine_tune_job_id=ftjob_id, 
-    openai_client=openai_client,
-    project="ml-experiments", 
-    wait_for_job_success=False,
-    tags=["ft", "openai", "stress", "800"])
-  return ftjob_id
+def upload_datasets(ats: dict, client: OpenAI) -> None:
+    stress_datasets_mapping = {}
+    run = wandb.init(project=WANDB_PROJECT, job_type=WandbJobType.SYNC.value)
+    logger.warning(f"ats keys {ats.keys()}")
+    for file_path in ats.keys():
+        file_art = run.use_artifact(file_path + ":latest")
+        dest = file_art.download()
+        logger.warning(f"Downloaded {file_path} to {dest}")
+        fileobj = client.files.create(
+            file=open(f"{dest}/{file_path}", "rb"), purpose="fine-tune"
+        )
+        logger.info(f"Uploaded {file_path} to OpenAI")
+        stress_datasets_mapping[file_path] = fileobj.id
+        # save mapping to file
+        with open(
+            STRESS_RAW_PATH.parent / "utils/stress_datasets_mapping.json", "w"
+        ) as json_file:
+            json.dump(stress_datasets_mapping, json_file)
+    run.finish()
 
 
-def predict(openai_client: OpenAI, test_df: pd.DataFrame,  model:str):
+def finetune_test(openai_client: OpenAI, model="gpt-3.5-turbo") -> str:  ##
+    ftmodel = openai_client.fine_tuning.jobs.create(
+        model=model,
+        training_file="file-ELcL7UfWJ11GKVcLMcX7rK",  # train 800
+        validation_file="file-JD8qkemtmDCdgH9xs9i5ce",  # validation
+        hyperparameters={"n_epochs": 3, "batch_size": 3, "learning_rate_multiplier": 2},
+    )
+    ftjob_id = ftmodel.id
+    status = ftmodel.status
+
+    logger.info(f"Fine-tuning model with jobID: {ftjob_id}.")
+    logger.info(f"Training Response: {ftmodel}")
+    logger.info(f"Training Status: {status}")
+    # todo check need for  of kwargs_wandb_init.config
+    WandbLogger.sync(
+        fine_tune_job_id=ftjob_id,
+        openai_client=openai_client,
+        project="ml-experiments",
+        wait_for_job_success=False,
+        tags=["ft", "openai", "stress", "800"],
+    )
+    return ftjob_id
+
+
+def predict(openai_client: OpenAI, test_df: pd.DataFrame, model: str):
     y_pred = []
     categories = ["non-stress", "stress"]
-    for _, row in tqdm(test_df.iterrows(), total=test_df.shape[0], desc="Processing rows"):
+    for _, row in tqdm(
+        test_df.iterrows(), total=test_df.shape[0], desc="Processing rows"
+    ):
         response = openai_client.chat.completions.create(
             model=model,
             messages=[
@@ -196,8 +207,7 @@ def predict(openai_client: OpenAI, test_df: pd.DataFrame,  model:str):
     return y_pred
 
 
-
-def run_evaluation(y_true: np.ndarray, y_pred:np.ndarray):
+def run_evaluation(y_true: np.ndarray, y_pred: np.ndarray):
     labels = ["non-stress", "stress"]
     mapping = {label: idx for idx, label in enumerate(labels)}
 
@@ -250,137 +260,145 @@ def eval_data_format(row):
 
     role_user_content = row["role: user"]
     role_user_dict = {"role": "user", "content": role_user_content}
-    
+
     return [role_system_dict, role_user_dict]
 
 
 if __name__ == "__main__":
-  output_dir = STRESS_RAW_PATH.parent/"processed"
-  client = OpenAI(api_key=os.getenv("OPENAI_API_KEY_MLEXPERIMENTS"))
-  prepare_data = True
-  train = False
-  evaluate = False
-  wandb_eval = False
+    output_dir = STRESS_RAW_PATH.parent / "processed"
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY_MLEXPERIMENTS"))
+    prepare_data = True
+    train = False
+    evaluate = False
+    wandb_eval = False
 
-  if prepare_data:
-    # load data
-    data_cleaned = stress_dataprep(STRESS_RAW_PATH)
-    # process data
-    ats = stress_split(data_cleaned, output_dir, serialize=True, fragment_trainset=True)
-    # upload
-    upload_datasets(ats, client)
-  if train:
-    for _ in range(3):
-      finetune_test(client)
-  if evaluate:
-    data_cleaned = load_stress_data(STRESS_RAW_PATH)
-    _, test_df = split_and_serialize_to_jsonl(data_cleaned, output_dir, serialize=False)
-    y_pred = predict(client, test_df, model="gpt-3.5-turbo")  
-    run_evaluation(test_df['label'], y_pred)
-    y_pred = predict(client, test_df, model="ft:gpt-3.5-turbo-0125:wingmate::AarlN1qI")  
-    run_evaluation(test_df['label'], y_pred)
-  if wandb_eval:
-    run = wandb.init(
-      project='ml-experiments',
-      job_type='eval'
-    )
-    VALIDATION_FILE_ARTIFACT_URI = 'wingmate-ai/ml-experiments/valid-file-JD8qkemtmDCdgH9xs9i5ce:v0'
+    if prepare_data:
+        # load data
+        data_cleaned = stress_dataprep(STRESS_RAW_PATH)
+        # process data
+        ats = stress_split(
+            data_cleaned, output_dir, serialize=True, fragment_trainset=True
+        )
+        # upload
+        upload_datasets(ats, client)
+    if train:
+        for _ in range(3):
+            finetune_test(client)
+    if evaluate:
+        data_cleaned = load_stress_data(STRESS_RAW_PATH)
+        _, test_df = split_and_serialize_to_jsonl(
+            data_cleaned, output_dir, serialize=False
+        )
+        y_pred = predict(client, test_df, model="gpt-3.5-turbo")
+        run_evaluation(test_df["label"], y_pred)
+        y_pred = predict(
+            client, test_df, model="ft:gpt-3.5-turbo-0125:wingmate::AarlN1qI"
+        )
+        run_evaluation(test_df["label"], y_pred)
+    if wandb_eval:
+        run = wandb.init(project="ml-experiments", job_type="eval")
+        VALIDATION_FILE_ARTIFACT_URI = (
+            "wingmate-ai/ml-experiments/valid-file-JD8qkemtmDCdgH9xs9i5ce:v0"
+        )
 
-    artifact_valid = run.use_artifact(
-        VALIDATION_FILE_ARTIFACT_URI,
-        type='validation_files'
-    )
-    artifact_valid_path = artifact_valid.download()
-    logger.info(f"Downloaded the validation data at: {artifact_valid_path}")
+        artifact_valid = run.use_artifact(
+            VALIDATION_FILE_ARTIFACT_URI, type="validation_files"
+        )
+        artifact_valid_path = artifact_valid.download()
+        logger.info(f"Downloaded the validation data at: {artifact_valid_path}")
 
-    validation_file = glob.glob(f"{artifact_valid_path}/*.table.json")[0]
-    with open(validation_file, 'r') as file:
-        data = json.load(file)
+        validation_file = glob.glob(f"{artifact_valid_path}/*.table.json")[0]
+        with open(validation_file, "r") as file:
+            data = json.load(file)
 
-    validation_df = pd.DataFrame(columns=data["columns"], data=data["data"])
+        validation_df = pd.DataFrame(columns=data["columns"], data=data["data"])
 
-    logger.info(f"There are {len(validation_df)} validation examples")
-    run.config.update({"num_validation_samples":len(validation_df)})
-    validation_df.head()
-    validation_df["messages"] = validation_df.apply(lambda row: eval_data_format(row), axis=1)
-    validation_df.head()
+        logger.info(f"There are {len(validation_df)} validation examples")
+        run.config.update({"num_validation_samples": len(validation_df)})
+        validation_df.head()
+        validation_df["messages"] = validation_df.apply(
+            lambda row: eval_data_format(row), axis=1
+        )
+        validation_df.head()
 
-    MODEL_ARTIFACT_URI = 'wingmate-ai/ml-experiments/model-metadata:v8' # REPLACE THIS WITH YOUR OWN ARTIFACT URI
+        MODEL_ARTIFACT_URI = "wingmate-ai/ml-experiments/model-metadata:v8"  # REPLACE THIS WITH YOUR OWN ARTIFACT URI
 
-    model_artifact = run.use_artifact(
-    MODEL_ARTIFACT_URI,
-    type='model'
-    )
-    model_metadata_path = model_artifact.download()
-    logger.info(f"Downloaded the validation data at: {model_metadata_path}")
+        model_artifact = run.use_artifact(MODEL_ARTIFACT_URI, type="model")
+        model_metadata_path = model_artifact.download()
+        logger.info(f"Downloaded the validation data at: {model_metadata_path}")
 
-    model_metadata_file = glob.glob(f"{model_metadata_path}/*.json")[0]
-    with open(model_metadata_file, 'r') as file:
-        model_metadata = json.load(file)
+        model_metadata_file = glob.glob(f"{model_metadata_path}/*.json")[0]
+        with open(model_metadata_file, "r") as file:
+            model_metadata = json.load(file)
 
-    fine_tuned_model = model_metadata["fine_tuned_model"]
-    prediction_table = wandb.Table(columns=['messages', 'completion', 'target'])
+        fine_tuned_model = model_metadata["fine_tuned_model"]
+        prediction_table = wandb.Table(columns=["messages", "completion", "target"])
 
-    eval_data = []
+        eval_data = []
 
-    for idx, row in tqdm(validation_df.iterrows()):
-        messages = row.messages
-        target = row["role: assistant"]
+        for idx, row in tqdm(validation_df.iterrows()):
+            messages = row.messages
+            target = row["role: assistant"]
 
-        res = client.chat.completions.create(model=fine_tuned_model, messages=messages, max_tokens=10)
-        completion = res.choices[0].message.content
+            res = client.chat.completions.create(
+                model=fine_tuned_model, messages=messages, max_tokens=10
+            )
+            completion = res.choices[0].message.content
 
-        eval_data.append([messages, completion, target])
-        prediction_table.add_data(messages[1]['content'], completion, target)
+            eval_data.append([messages, completion, target])
+            prediction_table.add_data(messages[1]["content"], completion, target)
 
-    wandb.log({'predictions': prediction_table})
-    correct = 0
-    for e in eval_data:
-      if e[1].lower() == e[2].lower():
-        correct+=1
+        wandb.log({"predictions": prediction_table})
+        correct = 0
+        for e in eval_data:
+            if e[1].lower() == e[2].lower():
+                correct += 1
 
-    accuracy = correct / len(eval_data)
+        accuracy = correct / len(eval_data)
 
-    print(f"Accuracy is {accuracy}")
-    wandb.log({"eval/accuracy": accuracy})
-    wandb.summary["eval/accuracy"] = accuracy
+        print(f"Accuracy is {accuracy}")
+        wandb.log({"eval/accuracy": accuracy})
+        wandb.summary["eval/accuracy"] = accuracy
 
-    correct = 0
-    for e in eval_data:
-      if e[1].lower() == e[2].lower():
-        correct+=1
+        correct = 0
+        for e in eval_data:
+            if e[1].lower() == e[2].lower():
+                correct += 1
 
-    accuracy = correct / len(eval_data)
+        accuracy = correct / len(eval_data)
 
-    print(f"Accuracy is {accuracy}")
-    wandb.log({"eval/accuracy": accuracy})
-    wandb.summary["eval/accuracy"] = accuracy
+        print(f"Accuracy is {accuracy}")
+        wandb.log({"eval/accuracy": accuracy})
+        wandb.summary["eval/accuracy"] = accuracy
 
+        baseline_prediction_table = wandb.Table(
+            columns=["messages", "completion", "target"]
+        )
 
-    baseline_prediction_table = wandb.Table(columns=['messages', 'completion', 'target'])
+        baseline_eval_data = []
 
-    baseline_eval_data = []
+        for idx, row in tqdm(validation_df.iterrows()):
+            messages = row.messages
+            target = row["role: assistant"]
 
-    for idx, row in tqdm(validation_df.iterrows()):
-        messages = row.messages
-        target = row["role: assistant"]
+            res = client.chat.completions.create(
+                model="gpt-3.5-turbo", messages=messages, max_tokens=10
+            )
+            completion = res.choices[0].message.content
 
-        res = client.chat.completions.create(model="gpt-3.5-turbo", messages=messages, max_tokens=10)
-        completion = res.choices[0].message.content
+            baseline_eval_data.append([messages, completion, target])
+            baseline_prediction_table.add_data(
+                messages[1]["content"], completion, target
+            )
 
-        baseline_eval_data.append([messages, completion, target])
-        baseline_prediction_table.add_data(messages[1]['content'], completion, target)
+        wandb.log({"baseline_predictions": baseline_prediction_table})
+        baseline_correct = 0
+        for e in baseline_eval_data:
+            if e[1].lower() == e[2].lower():
+                baseline_correct += 1
 
-    wandb.log({'baseline_predictions': baseline_prediction_table})
-    baseline_correct = 0
-    for e in baseline_eval_data:
-      if e[1].lower() == e[2].lower():
-        baseline_correct+=1
-
-    baseline_accuracy = baseline_correct / len(baseline_eval_data)
-    print(f"Baseline Accurcy is: {baseline_accuracy}")
-    wandb.log({"eval/baseline_accuracy": baseline_accuracy})
-    wandb.summary["eval/baseline_accuracy"] =  baseline_accuracy
-    wandb.finish()
-
-
+        baseline_accuracy = baseline_correct / len(baseline_eval_data)
+        print(f"Baseline Accurcy is: {baseline_accuracy}")
+        wandb.log({"eval/baseline_accuracy": baseline_accuracy})
+        wandb.summary["eval/baseline_accuracy"] = baseline_accuracy
+        wandb.finish()
