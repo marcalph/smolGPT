@@ -1,6 +1,6 @@
 import pytest
 from model.training import Splitter
-from model.tokenize import CharTokenizer
+from model.tokenizing import CharTokenizer
 from hypothesis import given, strategies as st
 import torch
 def test_splitter(test_corpus):

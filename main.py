@@ -1,9 +1,9 @@
 from data.utils import read_corpus
 from pathlib import Path
-from model.tokenize import CharTokenizer
+from model.tokenizing import CharTokenizer
 import logging
 from model.training import Splitter, make_batches, estimate_loss
-from model.architecture import (
+from model.architecturing import (
     smolTRF,
     max_steps,
     eval_interval,

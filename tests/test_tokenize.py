@@ -1,4 +1,4 @@
-from model.tokenize import CharTokenizer
+from model.tokenizing import CharTokenizer
 from hypothesis import given, strategies as st, settings, HealthCheck
 import torch
 
