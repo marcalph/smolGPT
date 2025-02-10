@@ -4,16 +4,19 @@ import torch.nn.functional as F
 torch.manual_seed(1337)
 
 #hparams
-batch_sz  = 32
-context_sz = 8
-max_steps = 20000
+batch_sz  = 64
+context_sz = 32
+max_steps = 5000
 eval_interval = 1000
 lr = 3e-4
 device = torch.device("cpu")#torch.device("mps") if torch.mps.is_available() else torch.device("cpu")
 eval_steps = 200
-d_embd = 32
+d_embd = 64
 vocab_sz = 65 
-d_head=8
+d_head=64
+n_heads = 6
+n_layers = 6
+dropout_rate = 0.2
 
 
 class Head(nn.Module):
@@ -23,7 +26,8 @@ class Head(nn.Module):
         self.key = nn.Linear(d_embd, d_head, bias = False)
         self.query = nn.Linear(d_embd, d_head, bias = False)
         self.value = nn.Linear(d_embd, d_head, bias = False)
-        self.register_buffer("tril", torch.tril(torch.ones(context_sz, context_sz)))        
+        self.register_buffer("tril", torch.tril(torch.ones(context_sz, context_sz)))
+        self.dropout = nn.Dropout(dropout_rate)
 
     def forward(self, x):
         B, T, C = x.shape
@@ -33,6 +37,7 @@ class Head(nn.Module):
         wei = q @ k.transpose(-2, -1) * C**(-0.5) # (B, T, C) @ (B, C, T) = (B, T, T)
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf")) # (B, T, T)
         wei = F.softmax(wei, dim=-1) # (B, T, T)
+        wei = self.dropout(wei)
         # weigthed sum of values
         v = self.value(x) # (B, T, C)
         out = wei @ v # (B, T, T) @ (B, T, C) = (B, T, C)
@@ -40,13 +45,57 @@ class Head(nn.Module):
 
 
 
-class BigramLMv2(nn.Module):
-    def __init__(self, vocab_sz, d_embd, d_head):
+class MultiHeadAttn(nn.Module):
+    def __init__(self, n_heads, d_embd, d_head):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(d_embd, d_head) for _ in range(n_heads)])
+        self.proj = nn.Linear(n_heads*d_head, d_embd)
+        self.dropout = nn.Dropout(dropout_rate)
+
+    def forward(self, x):
+        out = torch.cat([h(x) for h in self.heads], dim=-1)
+        out = self.proj(out)
+        return self.dropout(out)
+
+class FFN(nn.Module):
+    def __init__(self, d_embd):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_embd, 4*d_embd),
+            nn.ReLU(),
+            nn.Linear(4*d_embd, d_embd),
+            nn.Dropout(dropout_rate)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class AttnBlock(nn.Module):
+    def __init__(self, n_heads, d_embd, d_head):
+        super().__init__()
+        self.sa_heads = MultiHeadAttn(n_heads, d_embd, d_head)
+        self.ffn = FFN(d_embd)
+        self.ln1 = nn.LayerNorm(d_embd)
+        self.ln2 = nn.LayerNorm(d_embd)
+
+    def forward(self, x):
+        x = x + self.sa_heads(self.ln1(x))
+        x = x + self.ffn(self.ln2(x))
+        return x
+
+ 
+class smolTRF(nn.Module):
+    def __init__(self,n_layers,  vocab_sz, d_embd, d_head):
         super().__init__()
         self.emb = nn.Embedding(vocab_sz, d_embd)
         self.position_embeddings = nn.Embedding(context_sz, d_embd)
-        self.sa_head = Head(d_embd, d_head)
-        self.lm_head = nn.Linear(d_head, vocab_sz)
+        self.blocks = nn.Sequential(*[
+            AttnBlock(n_heads, d_embd, d_head) for _ in range(n_layers) ]
+            
+        )
+        self.ln_final = nn.LayerNorm(d_embd)
+        self.lm_head = nn.Linear(d_embd, vocab_sz)
 
     def forward(self, ix, targets=None):
         B, T = ix.shape
@@ -55,7 +104,8 @@ class BigramLMv2(nn.Module):
         tok_emb = self.emb(ix) # (B, T, C)
         pos_emb = self.position_embeddings(torch.arange(T, device=device)) # (T, C)
         x = tok_emb + pos_emb # (B, T, C)
-        x = self.sa_head(x) # (B, T, C)
+        x = self.blocks(x) # (B, T, C)
+        x = self.ln_final(x) # (B, T, C)
         logits = self.lm_head(x) # (B, T, vocab_sz)
 
         if targets is None:
