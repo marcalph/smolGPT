@@ -7,3 +7,4 @@ artifacts/
 .pytest_cache/
 .vscode/
 dalma.excalidraw
+dalma
