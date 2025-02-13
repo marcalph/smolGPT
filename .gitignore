@@ -6,5 +6,5 @@ artifacts/
 .hypothesis/
 .pytest_cache/
 .vscode/
-dalma.excalidraw
+dalma*.excalidraw
 dalma.md

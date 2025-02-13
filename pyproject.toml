@@ -14,6 +14,7 @@ graphviz = "^0.20.3"
 networkx = "^3.4.2"
 plotly = "^6.0.0"
 dspy = "^2.6.2"
+nbstripout = "^0.8.1"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"
