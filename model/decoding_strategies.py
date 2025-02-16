@@ -2,12 +2,21 @@ import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 import numpy as np
 import plotly.graph_objects as go
+import urllib, json
 
-# --- Load the model and tokenizer ---
 model_name = "gpt2"  # or any other causal LM model
 tokenizer = GPT2Tokenizer.from_pretrained(model_name)
 model = GPT2LMHeadModel.from_pretrained(model_name)
 model.eval()  # set model to evaluation mode
+
+prompt = "Once upon a time,"
+input_ids = tokenizer.encode(prompt, return_tensors="pt")
+steps_info = []
+cumulative_prob = 1.0
+
+
+
+
 
 # --- Helper function used by non-beam strategies ---
 def generate_step(input_ids, strategy, c=5, **kwargs):
@@ -253,23 +262,23 @@ def plot_sankey(steps_info, prompt, strategy_name, c=5):
     )
     fig.show()
 
-# --- Example Usage: Generate completions and plot ---
-prompt = "Once upon a time"
-steps = 5       # number of tokens to generate
-c = 5           # number of alternatives per step
+# # --- Example Usage: Generate completions and plot ---
+# prompt = "Once upon a time"
+# steps = 5       # number of tokens to generate
+# c = 5           # number of alternatives per step
 
-# Greedy Decoding
-greedy_info = greedy_decoding(prompt, steps=steps, c=c)
-plot_sankey(greedy_info, prompt, strategy_name="Greedy", c=c)
+# # Greedy Decoding
+# greedy_info = greedy_decoding(prompt, steps=steps, c=c)
+# plot_sankey(greedy_info, prompt, strategy_name="Greedy", c=c)
 
-# Top-K Sampling Decoding
-topk_info = top_k_decoding(prompt, steps=steps, c=c)
-plot_sankey(topk_info, prompt, strategy_name="Top-K", c=c)
+# # Top-K Sampling Decoding
+# topk_info = top_k_decoding(prompt, steps=steps, c=c)
+# plot_sankey(topk_info, prompt, strategy_name="Top-K", c=c)
 
-# Top-P (Nucleus) Sampling Decoding
-topp_info = top_p_decoding(prompt, steps=steps, c=c, p=0.9)
-plot_sankey(topp_info, prompt, strategy_name="Top-P (Nucleus)", c=c)
+# # Top-P (Nucleus) Sampling Decoding
+# topp_info = top_p_decoding(prompt, steps=steps, c=c, p=0.9)
+# plot_sankey(topp_info, prompt, strategy_name="Top-P (Nucleus)", c=c)
 
-# Beam Search Decoding (using a proper beam search)
-beam_info = beam_search_decoding(prompt, steps=steps, beam_width=5, c=c)
-plot_sankey(beam_info, prompt, strategy_name="Beam Search", c=c)
+# # Beam Search Decoding (using a proper beam search)
+# beam_info = beam_search_decoding(prompt, steps=steps, beam_width=5, c=c)
+# plot_sankey(beam_info, prompt, strategy_name="Beam Search", c=c)
