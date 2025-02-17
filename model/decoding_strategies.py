@@ -23,7 +23,6 @@ with torch.no_grad():
         next_token_probs = torch.softmax(next_token_logits, dim=0)
         topk_probs, topk_indices = torch.topk(next_token_probs, num_candidates)
         
-        # Convert candidate tokens to text
         candidate_tokens = [tokenizer.decode([idx]) for idx in topk_indices.tolist()]
         candidate_probs = topk_probs.tolist()
         
